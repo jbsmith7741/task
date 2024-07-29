@@ -55,7 +55,7 @@ func NewConsumer(conf *bus.Options) (bus.Consumer, error) {
 	return bus.NewConsumer(conf)
 }
 
-// LauncherOptions returns a new LauncherOptions.
+// NewLauncherOptions returns a new LauncherOptions.
 func NewLauncherOptions(tskType string) *LauncherOptions {
 	return &LauncherOptions{
 		MaxInProgress:  defaultMaxInProgress,
@@ -72,7 +72,7 @@ type LauncherOptions struct {
 	// in progress at one time.
 	MaxInProgress uint `toml:"max_in_progress" commented:"true" comment:"maximum number of workers within the application at one time"`
 
-	TaskLimit int `toml:"task-limit" commented:"true" comment:"tasks allowed be processed in an hour"`
+	TaskLimit int `toml:"task_limit" commented:"true" comment:"hourly task rate limit, 0 disables limit"`
 
 	// WorkerKillTime is how long the Launcher will
 	// wait for a forced-shutdown worker to clean up.
@@ -206,12 +206,16 @@ func NewLauncherFromBus(newWkr NewWorker, c bus.Consumer, p bus.Producer, opt *L
 		opt.Logger.Printf("NO WORKERS WILL BE LAUNCHED! task type handling is set to '%v' but no task type is provided", typeHandling)
 	}
 
-	l := rate.Limit(opt.TaskLimit / 3600.0)               // converts tasks/hour to tasks/second
-	limiter := rate.NewLimiter(l, int(opt.MaxInProgress)) // let each in worker can start with a task
+	l := rate.Limit(opt.TaskLimit) / 3600 // converts tasks/hour to tasks/second
+
+	limiter := rate.NewLimiter(l, int(opt.MaxInProgress)) // let each worker start with a task
 
 	// disable the limiter if not used by setting the burst to zero
 	if opt.TaskLimit == 0 {
 		limiter = nil
+		log.Println("rate-limit disabled")
+	} else {
+		log.Printf("rate-limit:%.2f task/sec -> %d task/hr burst:%d", l, opt.TaskLimit, opt.MaxInProgress)
 	}
 
 	return &Launcher{
